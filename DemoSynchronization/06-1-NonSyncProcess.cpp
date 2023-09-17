@@ -1,0 +1,24 @@
+// Не синхронизированные потоки, выполняющиеся в разных процессах
+
+#include <windows.h>
+#include <iostream>
+
+using namespace std;
+
+int main()
+{
+	int		i,j;
+
+	for (j = 10; j < 20; j++)
+	{
+		for (i = 0; i < 10; i++)
+		{
+			cout << j << ' ';
+			cout.flush();
+			Sleep(5);
+		}
+		cout << endl;
+	}
+		
+	return 0;
+}
