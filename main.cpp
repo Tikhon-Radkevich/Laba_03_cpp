@@ -25,7 +25,6 @@ struct MarkerThreadArgs {
 DWORD WINAPI MarkerThread(LPVOID lpParam) {
     MarkerThreadArgs* t_args = reinterpret_cast<MarkerThreadArgs*>(lpParam);
     int markerId = t_args->markerId;
-    cout << markerId << "\n";
 
     std::random_device rd;
     std::mt19937 rng(rd() + markerId);
@@ -38,16 +37,16 @@ DWORD WINAPI MarkerThread(LPVOID lpParam) {
 
         int indexToMark = dist(rng);
 
-        Sleep(3000);
+        Sleep(1000);
         if (array[indexToMark] == 0) {
             // Mark the element with the markerId
             array[indexToMark] = markerId;
 
-            for (int i = 0; i < arraySize; i++)
-            {
-                cout << array[i] << " ";
-            }
-            cout << std::endl;
+            // for (int i = 0; i < arraySize; i++)
+            // {
+            //     cout << array[i] << " ";
+            // }
+            // cout << std::endl;
 
             // Sleep for another 5 milliseconds
             Sleep(5);
@@ -57,9 +56,9 @@ DWORD WINAPI MarkerThread(LPVOID lpParam) {
             // Notify the main thread that marking is impossible
             SetEvent(markerEvents[markerId-1]);
             ResetEvent(StopMarkerEvents[markerId-1]);
-            cout << "\nSleep" << std::endl;
+            // cout << "\nSleep" << std::endl;
             WaitForSingleObject(StopMarkerEvents[markerId-1], INFINITE);
-            cout << "StopMarkerEvents\n";
+            // cout << "StopMarkerEvents\n";
         }
     }
     return 0;
@@ -97,15 +96,20 @@ int main() {
     // Signal marker threads to start
     SetEvent(mainEvent);
 
+    int TerminatedThedsCount = 0;
+
     while (true) {
         // Wait for all marker threads to signal completion or impossibility
-        DWORD waitResult = WaitForMultipleObjects(numMarkerThreads, markerEvents, TRUE, INFINITE);
+        DWORD waitResult = WaitForMultipleObjects(numMarkerThreads, markerEvents, FALSE, INFINITE);
 
-        if (waitResult == WAIT_OBJECT_0) {
+        cout << "Wait res: " << int(waitResult) << "\n";
+        Sleep(500);
+        if (waitResult >= WAIT_OBJECT_0 && waitResult <= WAIT_OBJECT_0 + TerminatedThedsCount) {
             ResetEvent(mainEvent);
 
             for (int i=0; i < numMarkerThreads; i ++){
                 SetEvent(StopMarkerEvents[i]);
+                ResetEvent(markerEvents[i]);
             }
 
             // Print the array contents
@@ -122,7 +126,10 @@ int main() {
             cout << "Enter the marker thread to terminate (1-" << numMarkerThreads << "): ";
             cin >> markerId;
 
-            TerminateThread(markerThreads[markerId-1], 0);    
+            TerminateThread(markerThreads[markerId-1], 0);  
+
+            TerminatedThedsCount += 1;  
+            
 
             // Clear the marked elements
             for (int i = 0; i < arraySize; i++) {
@@ -131,7 +138,6 @@ int main() {
                 }
             }
             
-
             SetEvent(mainEvent);
         }
     }
