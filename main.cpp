@@ -16,11 +16,11 @@ HANDLE* markerThreads;
 HANDLE mainEvent;
 HANDLE* markerEvents;
 HANDLE* StopMarkerEvents;
+HANDLE mutex = CreateMutex(NULL, FALSE, NULL);
 
 struct MarkerThreadArgs {
     int markerId;
     bool terminate = FALSE;
-    HANDLE mutex;
 };
 
 // Marker thread
@@ -28,18 +28,14 @@ DWORD WINAPI MarkerThread(LPVOID lpParam) {
     MarkerThreadArgs* t_args = reinterpret_cast<MarkerThreadArgs*>(lpParam);
     int markerId = t_args->markerId;
 
-    WaitForSingleObject(t_args->mutex, INFINITE);
-    cout << "Marker thread " << markerId << " started" << std::endl;
-    ReleaseMutex(t_args->mutex);
-
     std::random_device rd;
     std::mt19937 rng(rd() + markerId);
     std::uniform_int_distribution<int> dist(0, arraySize - 1);
 
     int counter = 0;
     while (true) {
+        // Clear the marked elements && terminate thread
         if (t_args->terminate == TRUE) {
-            // Clear the marked elements
             for (int i = 0; i < arraySize; i++) {
                 if (array[i] == markerId) {
                     array[i] = 0;
@@ -54,18 +50,20 @@ DWORD WINAPI MarkerThread(LPVOID lpParam) {
 
         if (array[indexToMark] == 0) {
             // Mark the element with the markerId
+            WaitForSingleObject(mutex, INFINITE);
+            Sleep(5);
             array[indexToMark] = markerId;
+            ReleaseMutex(mutex);
             counter++;
             Sleep(5);
         } else {
             // Notify the main thread that marking is impossible
-            // WaitForSingleObject(t_args->mutex, INFINITE);
-            // cout << "Marker: " << markerId << " ### Marked amount: " << counter << " ### Could not mark element: " << indexToMark << "\n";
-            // ReleaseMutex(t_args->mutex);
-            SetEvent(markerEvents[markerId - 1]);
+            WaitForSingleObject(mutex, INFINITE);
+            cout << "Marker: " << markerId << " ### Marked amount: " << counter << "\n";
+            ReleaseMutex(mutex);
             ResetEvent(StopMarkerEvents[markerId - 1]);
+            SetEvent(markerEvents[markerId - 1]);
             WaitForSingleObject(StopMarkerEvents[markerId - 1], INFINITE);
-            cout << "Marker: " << markerId << " ### Marked amount: " << counter << " ### Resuming marking\n";
         }
     }
     return 0;
@@ -75,7 +73,6 @@ int main() {
     cout << "Enter the size of the array: ";
     cin >> arraySize;
 
-    // Allocate memory for the array
     array = new int[arraySize];
     memset(array, 0, sizeof(int) * arraySize);
 
@@ -92,13 +89,9 @@ int main() {
     // Create the main event
     mainEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    // Create a mutex for cout protection
-    HANDLE coutMutex = CreateMutex(NULL, FALSE, NULL);
-
     // Create marker threads
     for (int i = 0; i < numMarkerThreads; i++) {
         thread_args[i].markerId = i + 1;
-        thread_args[i].mutex = coutMutex;
         markerEvents[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
         StopMarkerEvents[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
         markerThreads[i] = CreateThread(NULL, 0, MarkerThread, &thread_args[i], 0, NULL);
@@ -108,48 +101,55 @@ int main() {
     SetEvent(mainEvent);
 
     int TerminatedThedsCount = 0;
+    int markerId;
+    bool thread_to_terminate_choice = TRUE;
+    DWORD waitResult;
 
-    while (true) {
+    for(int mark_iter=0; mark_iter < numMarkerThreads; mark_iter++) {
+        SetEvent(mainEvent);
+
         // Wait for all marker threads to signal completion or impossibility
-        DWORD waitResult = WaitForMultipleObjects(numMarkerThreads, markerEvents, FALSE, INFINITE);
+        waitResult = WaitForMultipleObjects(numMarkerThreads, markerEvents, TRUE, INFINITE);
 
-        if (waitResult >= WAIT_OBJECT_0 && waitResult <= WAIT_OBJECT_0 + TerminatedThedsCount) {
+        // cout << "\nwait res: " << waitResult << "\n";
+        // DWORD waitResult_2 = WaitForMultipleObjects(numMarkerThreads, markerEvents, TRUE, INFINITE);
+        // cout << "\nwait res_2: " << waitResult_2 << "\n";
+
+        if (waitResult == WAIT_OBJECT_0) {
             ResetEvent(mainEvent);
 
             // Print the array contents
-            WaitForSingleObject(coutMutex, INFINITE);
-            cout << "Array contents: ";
+            cout << "\nArray contents: ";
             for (int i = 0; i < arraySize; i++) {
                 cout << array[i] << " ";
             }
-            cout << std::endl;
-            ReleaseMutex(coutMutex);
 
-            // Prompt for a marker thread to terminate
-            int markerId;
-            cout << "Enter the marker thread to terminate (1-" << numMarkerThreads << "): ";
-            cin >> markerId;
+            while (thread_to_terminate_choice){
+                // Prompt for a marker thread to terminate
+                cout << "\n\nEnter the marker thread to terminate (1-" << numMarkerThreads << "): ";
+                cin >> markerId;
 
-            thread_args[markerId - 1].terminate = TRUE;
+                if (thread_args[markerId - 1].terminate == TRUE){
+                    cout << "\nThread: " << markerId << " is terminated yeat. Choose another one.\n";
+                    continue;
+                } 
+                else{    
+                    thread_args[markerId - 1].terminate = TRUE;
 
-            for (int i = 0; i < numMarkerThreads; i++) {
-                SetEvent(StopMarkerEvents[i]);
-                ResetEvent(markerEvents[i]);
+                    for (int i = 0; i < numMarkerThreads; i++) {
+                        SetEvent(StopMarkerEvents[i]);
+                        if (thread_args[i].terminate == TRUE){
+                            SetEvent(markerEvents[i]);
+                        }
+                    }
+                    break;
+                }
             }
-
             WaitForSingleObject(markerThreads[markerId - 1], INFINITE); // Wait for the thread to terminate
-
-            TerminatedThedsCount += 1;
-
-            if (TerminatedThedsCount == numMarkerThreads) {
-                break;
-            }
-
-            SetEvent(mainEvent);
         }
     }
 
-    cout << "All marker threads terminated. Exiting..." << std::endl;
+    cout << "All marker threads terminated. Exiting...\n";
 
     // Clean up and release resources
     for (int i = 0; i < numMarkerThreads; i++) {
@@ -157,9 +157,7 @@ int main() {
         CloseHandle(markerEvents[i]);
         CloseHandle(StopMarkerEvents[i]);
     }
-
-    // Close the cout mutex
-    CloseHandle(coutMutex);
+    CloseHandle(mutex);
 
     delete[] array;
     delete[] markerThreads;
